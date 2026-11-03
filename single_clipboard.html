@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>QuickClip - 极速内容复制与备忘 (单HTML+SQLite版)</title>
+  
+  <!-- 样式库: Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 图标库: Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- 核心引擎: 浏览器端 WebAssembly SQLite3 (sql.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/sql.js@1.8.0/dist/sql-wasm.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'PingFang SC', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Consolas', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { transition: background-color 0.25s ease, color 0.25s ease; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.4); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.7); }
+    .glassmorphism {
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .dark .glassmorphism {
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    mark.highlight {
+      background-color: #fef08a;
+      color: #854d0e;
+      padding: 0.1rem 0.25rem;
+      border-radius: 0.25rem;
+      font-weight: 600;
+    }
+    .dark mark.highlight {
+      background-color: #854d0e;
+      color: #fef08a;
+    }
+    @keyframes pulse-once {
+      0% { transform: scale(1); }
+      50% { transform: scale(0.95); }
+      100% { transform: scale(1); }
+    }
+    .btn-pop { animation: pulse-once 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-white pb-24 md:pb-12">
+
+  <!-- 顶部导航栏 -->
+  <header class="sticky top-0 z-30 glassmorphism border-b border-slate-200/80 dark:border-slate-800/80 transition-colors">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <!-- 品牌 Logo -->
+      <div class="flex items-center space-x-3 cursor-pointer" onclick="resetFilters()">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-brand-500/25">
+          <i data-lucide="database" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-1.5">
+            <h1 class="font-bold text-lg leading-tight tracking-tight bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+              QuickClip
+            </h1>
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800">
+              单HTML+SQLite
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-500 dark:text-slate-400 font-medium tracking-wide">纯客户端 WebAssembly 引擎 · 零后端依赖</p>
+        </div>
+      </div>
+
+      <!-- 右侧快捷功能：导出/导入SQLite数据库、主题切换、新增 -->
+      <div class="flex items-center space-x-1 sm:space-x-2">
+        <!-- 导出 .db 文件 -->
+        <button onclick="exportDatabaseFile()" title="导出 SQLite 数据库文件 (data.db)" class="p-2 sm:px-3 sm:py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium flex items-center space-x-1.5 transition">
+          <i data-lucide="download" class="w-4 h-4 text-brand-500"></i>
+          <span class="hidden sm:inline">导出.db</span>
+        </button>
+
+        <!-- 载入 .db 文件 -->
+        <label title="导入已有的 SQLite .db 文件" class="p-2 sm:px-3 sm:py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs sm:text-sm font-medium flex items-center space-x-1.5 transition cursor-pointer">
+          <i data-lucide="upload" class="w-4 h-4 text-brand-500"></i>
+          <span class="hidden sm:inline">导入.db</span>
+          <input type="file" id="db-file-input" accept=".db,.sqlite,.sqlite3" class="hidden" onchange="importDatabaseFile(event)">
+        </label>
+
+        <!-- 暗黑模式切换 -->
+        <button id="theme-toggle" onclick="toggleTheme()" class="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="切换主题">
+          <i data-lucide="sun" class="w-5 h-5 hidden dark:block text-amber-400"></i>
+          <i data-lucide="moon" class="w-5 h-5 block dark:hidden text-slate-600"></i>
+        </button>
+
+        <!-- 顶部快速新建条目按钮 -->
+        <button onclick="openModal('create')" class="ml-1 sm:ml-2 bg-brand-600 hover:bg-brand-700 active:scale-95 text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 shadow-md shadow-brand-500/20 transition-all">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          <span>新增条目</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 数据库加载状态横幅 -->
+  <div id="db-status-bar" class="bg-indigo-50 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/60 py-2 px-4 text-center text-xs text-indigo-700 dark:text-indigo-300 flex items-center justify-center space-x-2">
+    <div class="w-3.5 h-3.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+    <span>正在初始化内置 WebAssembly SQLite 数据库引擎...</span>
+  </div>
+
+  <!-- 主体容器 -->
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 w-full flex-1 pt-6 pb-8">
+
+    <!-- 快捷新增卡片 (需求1: 名称、内容2个输入框+新增按钮) -->
+    <section class="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-md transition mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center space-x-2">
+          <span class="flex h-2.5 w-2.5 rounded-full bg-brand-600"></span>
+          <h2 class="font-bold text-slate-800 dark:text-slate-100 text-base">快捷新增条目</h2>
+          <span class="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">数据直存客户端 SQLite</span>
+        </div>
+        <span class="text-[12px] text-slate-500 dark:text-slate-400 hidden sm:inline">快捷键: <kbd class="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 font-mono text-[11px]">Ctrl</kbd> + <kbd class="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded border border-slate-300 dark:border-slate-700 font-mono text-[11px]">Enter</kbd> 提交</span>
+      </div>
+
+      <form id="quick-add-form" onsubmit="handleQuickCreate(event)" class="space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <!-- 名称输入框 (需求1) -->
+          <div class="sm:col-span-8 relative">
+            <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              条目名称 <span class="text-rose-500">*</span>
+            </label>
+            <div class="relative">
+              <i data-lucide="tag" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+              <input
+                type="text"
+                id="add-title"
+                placeholder="例如: 常用发票抬头 / 服务器SSH登录命令 / 客户回复话术"
+                required
+                maxlength="200"
+                class="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition text-slate-800 dark:text-slate-100"
+              />
+            </div>
+          </div>
+
+          <!-- 分类标签 -->
+          <div class="sm:col-span-4">
+            <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              分类标签
+            </label>
+            <div class="relative">
+              <i data-lucide="folder" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+              <input
+                type="text"
+                id="add-category"
+                placeholder="常用 (可自定)"
+                list="category-datalist"
+                value="常用"
+                class="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition text-slate-800 dark:text-slate-100"
+              />
+              <datalist id="category-datalist"></datalist>
+            </div>
+          </div>
+        </div>
+
+        <!-- 内容输入框 (需求1) -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400">
+              条目内容 (待复制文本) <span class="text-rose-500">*</span>
+            </label>
+            <span id="char-count" class="text-[11px] text-slate-500 dark:text-slate-400 font-mono">0 字符</span>
+          </div>
+          <textarea
+            id="add-content"
+            rows="3"
+            placeholder="在此输入需要一键复制的文本内容（支持换行、代码、命令、银行账号、复杂字符）..."
+            required
+            class="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition text-slate-800 dark:text-slate-100 font-mono text-xs sm:text-sm"
+            oninput="document.getElementById('char-count').textContent = this.value.length + ' 字符'"
+          ></textarea>
+        </div>
+
+        <div class="flex items-center justify-between pt-1">
+          <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5 inline mr-1 text-emerald-500"></i>
+            原生 SQLite 驱动 · IndexedDB 自动持久化存储
+          </p>
+          <!-- 新增按钮 (需求1) -->
+          <button
+            type="submit"
+            id="btn-submit-add"
+            class="ml-auto w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-700 hover:to-indigo-700 text-white font-medium text-sm flex items-center justify-center space-x-2 shadow-md shadow-brand-500/20 active:scale-95 transition"
+          >
+            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+            <span>立即新增条目</span>
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- 搜索与筛选工具栏 (需求2: 模糊查询名称和内容) -->
+    <div class="sticky top-16 z-20 py-3 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-md transition-colors">
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <!-- 搜索输入框 (需求2) -->
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400"></i>
+          <input
+            type="text"
+            id="search-input"
+            placeholder="模糊搜索名称或内容 (快捷键: /)..."
+            class="w-full pl-10 pr-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 text-slate-800 dark:text-slate-100 transition"
+          />
+          <button
+            id="clear-search"
+            class="hidden absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            title="清空搜索"
+            onclick="clearSearchInput()"
+          >
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- 排序选择 -->
+        <div class="flex items-center space-x-2 shrink-0">
+          <div class="relative">
+            <select
+              id="sort-select"
+              onchange="handleSortChange(this.value)"
+              class="appearance-none pl-3 pr-8 py-2.5 text-xs sm:text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 cursor-pointer"
+            >
+              <option value="pinned">⭐ 置顶优先</option>
+              <option value="copies">🔥 复制最多 (热度)</option>
+              <option value="recent">🕒 最新创建 / 修改</option>
+            </select>
+            <i data-lucide="chevron-down" class="w-4 h-4 absolute right-2.5 top-3 text-slate-400 pointer-events-none"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分类标签胶囊列表 -->
+      <div class="flex items-center space-x-1.5 overflow-x-auto py-2 scrollbar-none text-xs" id="category-chips">
+        <button onclick="setCategoryFilter('全部')" class="px-3 py-1.5 rounded-lg font-medium whitespace-nowrap bg-brand-600 text-white shadow-sm transition">
+          全部
+        </button>
+      </div>
+    </div>
+
+    <!-- 条目统计信息 -->
+    <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-3 px-1">
+      <div id="stats-summary">
+        正在读取 SQLite 数据库...
+      </div>
+      <div class="flex items-center space-x-2">
+        <span id="search-feedback" class="hidden text-brand-600 dark:text-brand-400 font-medium"></span>
+      </div>
+    </div>
+
+    <!-- 条目展示网格 (需求6: 完美适配手机显示) -->
+    <div id="items-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+
+    <!-- 空数据提示 -->
+    <div id="empty-state" class="hidden text-center py-16 px-4">
+      <div class="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-900 flex items-center justify-center mx-auto text-slate-400 mb-4">
+        <i data-lucide="inbox" class="w-8 h-8"></i>
+      </div>
+      <h3 class="text-base font-bold text-slate-700 dark:text-slate-200 mb-1">暂无对应内容</h3>
+      <p class="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mb-5">当前没有匹配的条目。您可以调整搜索关键词，或立即收录第一条常用文本。</p>
+      <button onclick="resetFilters(); document.getElementById('add-title').focus();" class="px-4 py-2 rounded-xl bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 text-xs font-semibold hover:bg-brand-100 transition">
+        重置筛选并新建
+      </button>
+    </div>
+
+  </main>
+
+  <!-- 移动端悬浮快捷新增按钮 FAB (高大上且极佳的手指操作体验) -->
+  <button
+    onclick="openModal('create')"
+    class="sm:hidden fixed right-5 bottom-6 z-40 w-14 h-14 rounded-full bg-gradient-to-tr from-brand-600 to-indigo-600 text-white flex items-center justify-center shadow-xl shadow-brand-500/30 active:scale-90 transition"
+    aria-label="新增条目"
+  >
+    <i data-lucide="plus" class="w-6 h-6"></i>
+  </button>
+
+  <!-- 全局 Toast 提示容器 -->
+  <div id="toast-container" class="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center space-y-2 pointer-events-none transition-all"></div>
+
+  <!-- 编辑/新建弹窗模态框 (需求4: 修改条目名称和内容) -->
+  <div id="modal-container" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden transition-all transform scale-95 opacity-0 duration-200" id="modal-box">
+      <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <div class="w-8 h-8 rounded-lg bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 flex items-center justify-center">
+            <i data-lucide="edit-3" class="w-4 h-4"></i>
+          </div>
+          <h3 class="font-bold text-base text-slate-800 dark:text-slate-100" id="modal-title">编辑条目</h3>
+        </div>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="modal-form" onsubmit="handleModalSubmit(event)" class="p-6 space-y-4">
+        <input type="hidden" id="modal-item-id" value="">
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+            条目名称 <span class="text-rose-500">*</span>
+          </label>
+          <input
+            type="text"
+            id="modal-item-title"
+            required
+            maxlength="200"
+            placeholder="例如: 常用发票抬头"
+            class="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-800 dark:text-slate-100 transition"
+          />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+            分类标签
+          </label>
+          <input
+            type="text"
+            id="modal-item-category"
+            placeholder="例如: 常用 / 代码 / 账号"
+            list="category-datalist"
+            class="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-800 dark:text-slate-100 transition"
+          />
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400">
+              条目内容 (待复制文本) <span class="text-rose-500">*</span>
+            </label>
+            <span id="modal-char-count" class="text-[11px] text-slate-500 dark:text-slate-400 font-mono">0 字符</span>
+          </div>
+          <textarea
+            id="modal-item-content"
+            rows="6"
+            required
+            placeholder="输入要复制的内容..."
+            class="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 text-slate-800 dark:text-slate-100 font-mono transition"
+            oninput="document.getElementById('modal-char-count').textContent = this.value.length + ' 字符'"
+          ></textarea>
+        </div>
+
+        <div class="flex items-center justify-end space-x-3 pt-2">
+          <button
+            type="button"
+            onclick="closeModal()"
+            class="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            id="modal-submit-btn"
+            class="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 active:scale-95 text-white text-sm font-semibold shadow-md shadow-brand-500/20 transition"
+          >
+            保存修改
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 删除确认弹窗 (需求3: 删除条目) -->
+  <div id="delete-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl text-center">
+      <div class="w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center mx-auto mb-3">
+        <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+      </div>
+      <h3 class="font-bold text-base text-slate-800 dark:text-slate-100 mb-1">确定要删除该条目吗？</h3>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mb-5 leading-relaxed" id="delete-item-title-preview">此操作不可撤销，条目将从 SQLite 数据库永久删除。</p>
+      <div class="flex items-center space-x-2.5">
+        <button
+          onclick="closeDeleteModal()"
+          class="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+        >
+          取消
+        </button>
+        <button
+          id="confirm-delete-btn"
+          onclick="executeDelete()"
+          class="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold shadow-md shadow-rose-500/20 active:scale-95 transition"
+        >
+          确认删除
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 脚本逻辑: 驱动 WebAssembly SQLite 与全部 CRUD 交互 -->
+  <script>
+    // 全局状态与 SQLite 实例
+    let db = null;
+    let SQL = null;
+    const DB_STORAGE_KEY = 'quickclip_sqlite_binary';
+    const DB_NAME = 'QuickClipStorageDB';
+    const STORE_NAME = 'sqlite_store';
+
+    const state = {
+      items: [],
+      currentKeyword: '',
+      currentCategory: '全部',
+      currentSort: 'pinned',
+      categories: ['全部', '常用'],
+      deletingId: null,
+      expandedIds: new Set(),
+    };
+
+    // DOM 元素引用
+    const elements = {
+      itemsGrid: document.getElementById('items-grid'),
+      emptyState: document.getElementById('empty-state'),
+      searchInput: document.getElementById('search-input'),
+      clearSearchBtn: document.getElementById('clear-search'),
+      sortSelect: document.getElementById('sort-select'),
+      categoryChips: document.getElementById('category-chips'),
+      categoryDatalist: document.getElementById('category-datalist'),
+      statsSummary: document.getElementById('stats-summary'),
+      searchFeedback: document.getElementById('search-feedback'),
+      toastContainer: document.getElementById('toast-container'),
+      modalContainer: document.getElementById('modal-container'),
+      modalBox: document.getElementById('modal-box'),
+      deleteModal: document.getElementById('delete-modal'),
+      deleteItemTitlePreview: document.getElementById('delete-item-title-preview'),
+      dbStatusBar: document.getElementById('db-status-bar'),
+    };
+
+    // ==========================================================
+    // 1. WebAssembly SQLite3 引擎初始化与 IndexedDB 持久化
+    // ==========================================================
+    document.addEventListener('DOMContentLoaded', async () => {
+      initTheme();
+      initKeyboardShortcuts();
+      await initSqliteEngine();
+    });
+
+    async function initSqliteEngine() {
+      try {
+        // 加载 sql.js wasm 模块
+        SQL = await initSqlJs({
+          locateFile: file => `https://cdn.jsdelivr.net/npm/sql.js@1.8.0/dist/${file}`
+        });
+
+        // 尝试从 IndexedDB 加载先前持久化的数据库二进制流
+        const savedBinary = await loadDatabaseFromIndexedDB();
+        if (savedBinary) {
+          db = new SQL.Database(savedBinary);
+          console.log('成功从本地 IndexedDB 载入 SQLite 数据库！');
+        } else {
+          db = new SQL.Database();
+          initTablesAndSeed();
+          console.log('初始化全新 SQLite 数据库并写入种子数据。');
+          await persistDatabaseToIndexedDB();
+        }
+
+        // 状态栏更新为已就绪
+        elements.dbStatusBar.innerHTML = `
+          <div class="flex items-center space-x-2 text-emerald-700 dark:text-emerald-300">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>SQLite 数据库引擎已就绪 (WebAssembly 3.x) · 纯本地私密存储</span>
+          </div>
+        `;
+        setTimeout(() => {
+          elements.dbStatusBar.classList.add('hidden');
+        }, 3000);
+
+        fetchCategories();
+        loadItemsFromSqlite();
+      } catch (err) {
+        console.error('初始化 SQLite 失败:', err);
+        elements.dbStatusBar.innerHTML = `
+          <span class="text-rose-600 dark:text-rose-400">
+            ⚠️ 加载 WebAssembly SQLite 失败，请检查网络或直接双击用本地服务运行。错误: ${err.message}
+          </span>
+        `;
+      }
+    }
+
+    function initTablesAndSeed() {
+      // 创建表结构
+      const schemaSql = `
+        CREATE TABLE IF NOT EXISTS clipboard_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          category TEXT NOT NULL DEFAULT '常用',
+          is_pinned INTEGER NOT NULL DEFAULT 0,
+          copy_count INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_title ON clipboard_items(title);
+        CREATE INDEX IF NOT EXISTS idx_pinned ON clipboard_items(is_pinned DESC, updated_at DESC);
+      `;
+      db.run(schemaSql);
+
+      // 预置常用示例演示数据
+      const seedSql = `
+        INSERT INTO clipboard_items (title, content, category, is_pinned, copy_count) VALUES
+        ('常用增值税发票信息', '公司全称: 示例未来科技有限公司\n统一社会信用代码: 91110108MA00000000\n开户行: 中国招商银行软件园支行\n账号: 6225 8801 2345 6789', '常用', 1, 15),
+        ('Git 撤销上一次 Commit 并保留修改', 'git reset --soft HEAD~1', '代码片段', 1, 9),
+        ('Python 快速开启局域网 HTTP 静态服务器', 'python -m http.server 8080 --bind 0.0.0.0', '代码片段', 0, 6),
+        ('客户支持常用安抚与跟进话术', '您好，非常抱歉给您带来了不便！关于您反馈的问题，我们技术团队已经紧急跟进排查，预计 30 分钟内给您详细答复，请您稍候。', '快捷话术', 0, 4);
+      `;
+      db.run(seedSql);
+    }
+
+    // ==========================================================
+    // 2. IndexedDB 异步二进制读写 (无缝替代本地磁盘写入)
+    // ==========================================================
+    function getIndexedDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, 1);
+        request.onupgradeneeded = (e) => {
+          const idb = e.target.result;
+          if (!idb.objectStoreNames.contains(STORE_NAME)) {
+            idb.createObjectStore(STORE_NAME);
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function persistDatabaseToIndexedDB() {
+      if (!db) return;
+      try {
+        const binary = db.export(); // 导出 SQLite 原始 Uint8Array
+        const idb = await getIndexedDB();
+        const tx = idb.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(binary, DB_STORAGE_KEY);
+      } catch (err) {
+        console.error('持久化到 IndexedDB 失败:', err);
+      }
+    }
+
+    async function loadDatabaseFromIndexedDB() {
+      try {
+        const idb = await getIndexedDB();
+        return new Promise((resolve) => {
+          const tx = idb.transaction(STORE_NAME, 'readonly');
+          const req = tx.objectStore(STORE_NAME).get(DB_STORAGE_KEY);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        });
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // ==========================================================
+    // 3. 核心功能: 增删改查 (SQLite SQL 原生查询)
+    // ==========================================================
+    function loadItemsFromSqlite() {
+      if (!db) return;
+
+      let query = "SELECT id, title, content, category, is_pinned, copy_count, created_at, updated_at FROM clipboard_items";
+      const conditions = [];
+      const params = [];
+
+      // 模糊查询 (需求2)
+      if (state.currentKeyword && state.currentKeyword.trim()) {
+        conditions.push("(title LIKE ? OR content LIKE ?)");
+        const kw = `%${state.currentKeyword.trim()}%`;
+        params.push(kw, kw);
+      }
+
+      // 分类筛选
+      if (state.currentCategory && state.currentCategory !== '全部') {
+        conditions.push("category = ?");
+        params.push(state.currentCategory);
+      }
+
+      if (conditions.length > 0) {
+        query += " WHERE " + conditions.join(" AND ");
+      }
+
+      // 排序
+      const sortMap = {
+        'pinned': "is_pinned DESC, updated_at DESC",
+        'copies': "copy_count DESC, is_pinned DESC, updated_at DESC",
+        'recent': "updated_at DESC"
+      };
+      query += " ORDER BY " + (sortMap[state.currentSort] || "is_pinned DESC, updated_at DESC");
+
+      try {
+        const stmt = db.prepare(query);
+        stmt.bind(params);
+        const rows = [];
+        while (stmt.step()) {
+          rows.push(stmt.getAsObject());
+        }
+        stmt.free();
+
+        state.items = rows;
+        renderItems();
+        updateStats(rows.length);
+      } catch (err) {
+        console.error('SQL 查询异常:', err);
+        showToast('SQL 查询出错: ' + err.message, 'error');
+      }
+    }
+
+    function fetchCategories() {
+      if (!db) return;
+      try {
+        const res = db.exec("SELECT DISTINCT category FROM clipboard_items WHERE category IS NOT NULL AND category != ''");
+        const list = ['全部', '常用'];
+        if (res.length > 0 && res[0].values) {
+          res[0].values.forEach(val => {
+            const cat = val[0];
+            if (cat && !list.includes(cat)) list.push(cat);
+          });
+        }
+        state.categories = list;
+        renderCategories();
+      } catch (err) {
+        console.error('读取分类失败:', err);
+      }
+    }
+
+    function renderCategories() {
+      elements.categoryChips.innerHTML = state.categories.map(cat => {
+        const isActive = state.currentCategory === cat;
+        return `
+          <button
+            onclick="setCategoryFilter('${escapeHtml(cat)}')"
+            class="px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition text-xs ${
+              isActive
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-800 hover:border-brand-500'
+            }"
+          >
+            ${escapeHtml(cat)}
+          </button>
+        `;
+      }).join('');
+
+      elements.categoryDatalist.innerHTML = state.categories
+        .filter(c => c !== '全部')
+        .map(c => `<option value="${escapeHtml(c)}"></option>`)
+        .join('');
+    }
+
+    function setCategoryFilter(cat) {
+      state.currentCategory = cat;
+      renderCategories();
+      loadItemsFromSqlite();
+    }
+
+    function handleSortChange(sort) {
+      state.currentSort = sort;
+      loadItemsFromSqlite();
+    }
+
+    function updateStats(count) {
+      if (state.currentKeyword) {
+        elements.statsSummary.innerHTML = `匹配条目: <span class="font-semibold text-slate-800 dark:text-slate-100">${count}</span> 条`;
+        elements.searchFeedback.classList.remove('hidden');
+        elements.searchFeedback.textContent = `关键字: "${state.currentKeyword}"`;
+      } else {
+        const totalCopies = state.items.reduce((sum, item) => sum + (item.copy_count || 0), 0);
+        elements.statsSummary.innerHTML = `已收录 <span class="font-semibold text-slate-800 dark:text-slate-100">${count}</span> 个条目 · 累计复制 <span class="font-semibold text-brand-600 dark:text-brand-400">${totalCopies}</span> 次`;
+        elements.searchFeedback.classList.add('hidden');
+      }
+    }
+
+    function renderItems() {
+      if (state.items.length === 0) {
+        elements.itemsGrid.innerHTML = '';
+        elements.emptyState.classList.remove('hidden');
+        return;
+      }
+
+      elements.emptyState.classList.add('hidden');
+      elements.itemsGrid.innerHTML = state.items.map(item => createItemCardHtml(item)).join('');
+      lucide.createIcons();
+    }
+
+    function createItemCardHtml(item) {
+      const isPinned = item.is_pinned === 1;
+      const isExpanded = state.expandedIds.has(item.id);
+      const isLong = item.content.length > 120 || (item.content.match(/\n/g) || []).length > 2;
+
+      const titleHighlighted = highlightText(item.title, state.currentKeyword);
+      const contentHighlighted = highlightText(item.content, state.currentKeyword);
+
+      return `
+        <article class="group relative bg-white dark:bg-slate-900 border ${
+          isPinned
+            ? 'border-amber-300/80 dark:border-amber-500/40 shadow-sm shadow-amber-500/5'
+            : 'border-slate-200/90 dark:border-slate-800 shadow-sm'
+        } rounded-2xl p-4 sm:p-5 flex flex-col justify-between hover:shadow-md hover:border-brand-500/40 dark:hover:border-brand-500/40 transition duration-200">
+
+          <div>
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
+                  ${
+                    isPinned
+                      ? `<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                          <i data-lucide="pin" class="w-2.5 h-2.5"></i>
+                          <span>置顶</span>
+                        </span>`
+                      : ''
+                  }
+                  <span class="inline-block px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    ${escapeHtml(item.category || '常用')}
+                  </span>
+                  <span class="text-[10px] text-slate-400 font-mono">
+                    ${escapeHtml(item.content.length.toString())} 字符
+                  </span>
+                </div>
+                <h3 class="font-bold text-sm sm:text-base text-slate-800 dark:text-slate-100 break-words leading-snug">
+                  ${titleHighlighted}
+                </h3>
+              </div>
+
+              <!-- 操作图标组 (置顶 / 修改 / 删除) -->
+              <div class="flex items-center space-x-0.5 shrink-0 -mr-1">
+                <button
+                  onclick="togglePin(${item.id})"
+                  class="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition ${isPinned ? 'text-amber-500' : ''}"
+                  title="${isPinned ? '取消置顶' : '置顶条目'}"
+                >
+                  <i data-lucide="pin" class="w-4 h-4 ${isPinned ? 'fill-amber-500' : ''}"></i>
+                </button>
+                <button
+                  onclick="openEditModal(${item.id})"
+                  class="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  title="修改条目 (需求4)"
+                >
+                  <i data-lucide="edit-2" class="w-4 h-4"></i>
+                </button>
+                <button
+                  onclick="confirmDelete(${item.id}, '${escapeHtml(item.title).replace(/'/g, "\\'")}')"
+                  class="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  title="删除条目 (需求3)"
+                >
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- 内容展示 (需求5) -->
+            <div class="relative my-3">
+              <div
+                class="bg-slate-50 dark:bg-slate-950/70 rounded-xl p-3 text-xs sm:text-sm font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-all select-all border border-slate-100 dark:border-slate-800/80 transition-all ${
+                  !isExpanded && isLong ? 'max-h-24 overflow-hidden' : ''
+                }"
+              >${contentHighlighted}</div>
+
+              ${
+                isLong
+                  ? `<button
+                      onclick="toggleExpand(${item.id})"
+                      class="text-[11px] text-brand-600 dark:text-brand-400 hover:underline mt-1 font-medium flex items-center space-x-0.5"
+                    >
+                      <span>${isExpanded ? '收起长文本' : '展开全文'}</span>
+                      <i data-lucide="${isExpanded ? 'chevron-up' : 'chevron-down'}" class="w-3 h-3"></i>
+                    </button>`
+                  : ''
+              }
+            </div>
+          </div>
+
+          <!-- 底部工具栏: 复制按钮 (需求5) -->
+          <div class="pt-2 border-t border-slate-100 dark:border-slate-800/70 flex items-center justify-between gap-3">
+            <div class="text-[11px] text-slate-400 flex items-center space-x-1">
+              <i data-lucide="sparkles" class="w-3 h-3 text-brand-500"></i>
+              <span id="copy-count-${item.id}">已复制 ${item.copy_count || 0} 次</span>
+            </div>
+
+            <!-- 复制按钮 -->
+            <button
+              id="copy-btn-${item.id}"
+              onclick="copyItemContent(${item.id}, ${JSON.stringify(item.content).replace(/"/g, '&quot;')})"
+              class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-brand-600 dark:hover:bg-brand-500 text-white font-semibold text-xs sm:text-sm flex items-center space-x-1.5 shadow-sm active:scale-95 transition"
+            >
+              <i data-lucide="copy" class="w-3.5 h-3.5" id="copy-icon-${item.id}"></i>
+              <span id="copy-text-${item.id}">复制内容</span>
+            </button>
+          </div>
+
+        </article>
+      `;
+    }
+
+    // ==========================================================
+    // 4. 核心功能: 新增条目 (需求1)
+    // ==========================================================
+    async function handleQuickCreate(e) {
+      e.preventDefault();
+      const titleInput = document.getElementById('add-title');
+      const contentInput = document.getElementById('add-content');
+      const categoryInput = document.getElementById('add-category');
+
+      const title = titleInput.value.trim();
+      const content = contentInput.value.trim();
+      const category = categoryInput.value.trim() || '常用';
+
+      if (!title || !content) {
+        showToast('请填写条目名称和内容', 'error');
+        return;
+      }
+
+      try {
+        db.run(
+          "INSERT INTO clipboard_items (title, content, category, updated_at) VALUES (?, ?, ?, datetime('now', 'localtime'))",
+          [title, content, category]
+        );
+        await persistDatabaseToIndexedDB();
+
+        showToast('条目成功新增并保存至 SQLite！', 'success');
+        titleInput.value = '';
+        contentInput.value = '';
+        document.getElementById('char-count').textContent = '0 字符';
+        fetchCategories();
+        loadItemsFromSqlite();
+      } catch (err) {
+        console.error('新增异常:', err);
+        showToast('新增失败: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================
+    // 5. 核心功能: 模糊查询 (需求2)
+    // ==========================================================
+    let searchDebounceTimer = null;
+    elements.searchInput.addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      state.currentKeyword = val;
+      elements.clearSearchBtn.classList.toggle('hidden', val.length === 0);
+
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        loadItemsFromSqlite();
+      }, 200);
+    });
+
+    function clearSearchInput() {
+      elements.searchInput.value = '';
+      state.currentKeyword = '';
+      elements.clearSearchBtn.classList.add('hidden');
+      loadItemsFromSqlite();
+    }
+
+    // ==========================================================
+    // 6. 核心功能: 删除条目 (需求3)
+    // ==========================================================
+    function confirmDelete(id, title) {
+      state.deletingId = id;
+      elements.deleteItemTitlePreview.textContent = `即将永久删除：“${title}”，从 SQLite 数据库移除。`;
+      elements.deleteModal.classList.remove('hidden');
+      elements.deleteModal.classList.add('flex');
+    }
+
+    function closeDeleteModal() {
+      state.deletingId = null;
+      elements.deleteModal.classList.remove('flex');
+      elements.deleteModal.classList.add('hidden');
+    }
+
+    async function executeDelete() {
+      if (!state.deletingId) return;
+      try {
+        db.run("DELETE FROM clipboard_items WHERE id = ?", [state.deletingId]);
+        await persistDatabaseToIndexedDB();
+        showToast('条目已从 SQLite 删除', 'success');
+        closeDeleteModal();
+        fetchCategories();
+        loadItemsFromSqlite();
+      } catch (err) {
+        showToast('删除失败: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================
+    // 7. 核心功能: 修改条目 (需求4)
+    // ==========================================================
+    function openModal(mode = 'create', item = null) {
+      const modal = elements.modalContainer;
+      const box = elements.modalBox;
+      const title = document.getElementById('modal-title');
+      const submitBtn = document.getElementById('modal-submit-btn');
+
+      if (mode === 'create') {
+        title.textContent = '新增条目';
+        submitBtn.textContent = '立即新增';
+        document.getElementById('modal-item-id').value = '';
+        document.getElementById('modal-item-title').value = '';
+        document.getElementById('modal-item-content').value = '';
+        document.getElementById('modal-item-category').value = '常用';
+        document.getElementById('modal-char-count').textContent = '0 字符';
+      } else if (item) {
+        title.textContent = '修改条目';
+        submitBtn.textContent = '保存修改';
+        document.getElementById('modal-item-id').value = item.id;
+        document.getElementById('modal-item-title').value = item.title;
+        document.getElementById('modal-item-content').value = item.content;
+        document.getElementById('modal-item-category').value = item.category || '常用';
+        document.getElementById('modal-char-count').textContent = `${item.content.length} 字符`;
+      }
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      setTimeout(() => {
+        box.classList.remove('scale-95', 'opacity-0');
+        box.classList.add('scale-100', 'opacity-100');
+        document.getElementById('modal-item-title').focus();
+      }, 10);
+    }
+
+    function closeModal() {
+      const modal = elements.modalContainer;
+      const box = elements.modalBox;
+      box.classList.remove('scale-100', 'opacity-100');
+      box.classList.add('scale-95', 'opacity-0');
+      setTimeout(() => {
+        modal.classList.remove('flex');
+        modal.classList.add('hidden');
+      }, 150);
+    }
+
+    function openEditModal(itemId) {
+      const stmt = db.prepare("SELECT * FROM clipboard_items WHERE id = ?");
+      stmt.bind([itemId]);
+      if (stmt.step()) {
+        const item = stmt.getAsObject();
+        stmt.free();
+        openModal('edit', item);
+      } else {
+        stmt.free();
+        showToast('条目未找到', 'error');
+      }
+    }
+
+    async function handleModalSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById('modal-item-id').value;
+      const title = document.getElementById('modal-item-title').value.trim();
+      const content = document.getElementById('modal-item-content').value.trim();
+      const category = document.getElementById('modal-item-category').value.trim() || '常用';
+
+      if (!title || !content) {
+        showToast('标题和内容均不能为空', 'error');
+        return;
+      }
+
+      try {
+        if (id) {
+          db.run(
+            "UPDATE clipboard_items SET title = ?, content = ?, category = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+            [title, content, category, id]
+          );
+          showToast('修改已保存！', 'success');
+        } else {
+          db.run(
+            "INSERT INTO clipboard_items (title, content, category, updated_at) VALUES (?, ?, ?, datetime('now', 'localtime'))",
+            [title, content, category]
+          );
+          showToast('新增成功！', 'success');
+        }
+
+        await persistDatabaseToIndexedDB();
+        closeModal();
+        fetchCategories();
+        loadItemsFromSqlite();
+      } catch (err) {
+        showToast('保存失败: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================
+    // 8. 核心功能: 一键复制 (需求5)
+    // ==========================================================
+    async function copyItemContent(itemId, text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textArea = document.createElement("textarea");
+          textArea.value = text;
+          textArea.style.position = "fixed";
+          textArea.style.left = "-999999px";
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand('copy');
+          textArea.remove();
+        }
+
+        // 按钮变色反馈
+        const btn = document.getElementById(`copy-btn-${itemId}`);
+        const label = document.getElementById(`copy-text-${itemId}`);
+        if (btn && label) {
+          btn.classList.add('bg-emerald-600', 'hover:bg-emerald-700', 'btn-pop');
+          btn.classList.remove('bg-slate-900', 'dark:bg-brand-600');
+          label.textContent = '已复制! ✓';
+
+          setTimeout(() => {
+            btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-700', 'btn-pop');
+            btn.classList.add('bg-slate-900', 'dark:bg-brand-600');
+            label.textContent = '复制内容';
+          }, 1500);
+        }
+
+        // 手机轻微震动
+        if (navigator.vibrate) navigator.vibrate(40);
+
+        // SQLite 累加复制次数
+        db.run("UPDATE clipboard_items SET copy_count = copy_count + 1 WHERE id = ?", [itemId]);
+        await persistDatabaseToIndexedDB();
+
+        // 局部更新计数显示
+        const countStmt = db.prepare("SELECT copy_count FROM clipboard_items WHERE id = ?");
+        countStmt.bind([itemId]);
+        if (countStmt.step()) {
+          const newCount = countStmt.getAsObject().copy_count;
+          const countElem = document.getElementById(`copy-count-${itemId}`);
+          if (countElem) countElem.textContent = `已复制 ${newCount} 次`;
+        }
+        countStmt.free();
+
+        showToast('内容已复制到剪贴板！', 'success');
+      } catch (err) {
+        console.error('复制出错:', err);
+        showToast('复制失败，请手动选中文本', 'error');
+      }
+    }
+
+    // ==========================================================
+    // 9. 置顶与辅助扩展
+    // ==========================================================
+    async function togglePin(itemId) {
+      try {
+        db.run(
+          "UPDATE clipboard_items SET is_pinned = CASE WHEN is_pinned = 1 THEN 0 ELSE 1 END WHERE id = ?",
+          [itemId]
+        );
+        await persistDatabaseToIndexedDB();
+        showToast('置顶状态已切换', 'success');
+        loadItemsFromSqlite();
+      } catch (err) {
+        showToast('置顶失败: ' + err.message, 'error');
+      }
+    }
+
+    function toggleExpand(itemId) {
+      if (state.expandedIds.has(itemId)) {
+        state.expandedIds.delete(itemId);
+      } else {
+        state.expandedIds.add(itemId);
+      }
+      renderItems();
+    }
+
+    function resetFilters() {
+      state.currentKeyword = '';
+      state.currentCategory = '全部';
+      state.currentSort = 'pinned';
+      elements.searchInput.value = '';
+      elements.clearSearchBtn.classList.add('hidden');
+      elements.sortSelect.value = 'pinned';
+      renderCategories();
+      loadItemsFromSqlite();
+    }
+
+    // ==========================================================
+    // 10. SQLite 原生文件 I/O (导出/导入 .db)
+    // ==========================================================
+    function exportDatabaseFile() {
+      if (!db) return;
+      try {
+        const binary = db.export(); // 获取原始 SQLite 二进制数组
+        const blob = new Blob([binary], { type: 'application/x-sqlite3' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `quickclip_sqlite_${new Date().toISOString().slice(0, 10)}.db`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('SQLite 数据库文件已开始下载', 'success');
+      } catch (err) {
+        showToast('导出失败: ' + err.message, 'error');
+      }
+    }
+
+    function importDatabaseFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const uints = new Uint8Array(reader.result);
+          // 创建新数据库实例验证
+          const newDb = new SQL.Database(uints);
+          db = newDb;
+          await persistDatabaseToIndexedDB();
+          showToast('成功载入 SQLite 数据库！', 'success');
+          fetchCategories();
+          loadItemsFromSqlite();
+        } catch (err) {
+          showToast('载入 SQLite 文件失败，非标准数据库', 'error');
+        } finally {
+          e.target.value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // ==========================================================
+    // 11. UI 与主题辅助
+    // ==========================================================
+    function initTheme() {
+      const savedTheme = localStorage.getItem('qc_theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+
+    function toggleTheme() {
+      const isDark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('qc_theme', isDark ? 'dark' : 'light');
+      lucide.createIcons();
+    }
+
+    function initKeyboardShortcuts() {
+      window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey && e.key === 'k') || (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA')) {
+          e.preventDefault();
+          elements.searchInput.focus();
+        }
+        if (e.key === 'Escape') {
+          closeModal();
+          closeDeleteModal();
+        }
+      });
+    }
+
+    function showToast(message, type = 'info') {
+      const toast = document.createElement('div');
+      const isSuccess = type === 'success';
+      const isError = type === 'error';
+
+      toast.className = `flex items-center space-x-2 px-4 py-2.5 rounded-xl shadow-lg border text-xs sm:text-sm font-medium transform transition-all duration-300 translate-y-[-10px] opacity-0 pointer-events-auto ${
+        isSuccess
+          ? 'bg-emerald-50 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800'
+          : isError
+          ? 'bg-rose-50 dark:bg-rose-950/90 text-rose-800 dark:text-rose-200 border-rose-200 dark:border-rose-800'
+          : 'bg-slate-900 text-white border-slate-700'
+      }`;
+
+      const iconName = isSuccess ? 'check-circle' : isError ? 'alert-circle' : 'info';
+      toast.innerHTML = `
+        <i data-lucide="${iconName}" class="w-4 h-4 shrink-0"></i>
+        <span>${escapeHtml(message)}</span>
+      `;
+
+      elements.toastContainer.appendChild(toast);
+      lucide.createIcons();
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-[-10px]', 'opacity-0');
+        toast.classList.add('translate-y-0', 'opacity-100');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-[-8px]');
+        setTimeout(() => toast.remove(), 300);
+      }, 2500);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function highlightText(text, keyword) {
+      const safeText = escapeHtml(text);
+      if (!keyword || !keyword.trim()) return safeText;
+      const cleanKw = keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(${cleanKw})`, 'gi');
+      return safeText.replace(regex, '<mark class="highlight">$1</mark>');
+    }
+  </script>
+</body>
+</html>
+
