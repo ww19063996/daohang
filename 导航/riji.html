@@ -274,7 +274,7 @@
          */
         (function() {
             // 基础防抓取混淆：运行时在客户端动态将 Base64 编码的域名池解码
-            const RAW_BASE64_DOMAINS = "WyJodHRwOi8vZnJwOS5hYXN6eGMuYXNpYToxMDI3Mi9iYW9iaWFvLmh0bWwiLCAiaHR0cDovL3NpbWluLmV1Lm9yZzo3MDA1L2Jhb2JpYW8uaHRtbCJd"; // 服务端注入的 Base64 密文
+            const RAW_BASE64_DOMAINS = "WyJodHRwOi8vc2ltaW4uZXUub3JnOjcwMDYvbG9naW4iLCAiaHR0cDovL2ZycDkuYWFzenhjLmFzaWE6MTAyNzMvbG9naW4iXQ=="; // 服务端注入的 Base64 密文
             const SLUG = "riji"; // 项目唯一标识
             const PROBE_PATH = "/favicon.ico"; // 探活路径
             const TIMEOUT_MS = 3000; // 超时时间（毫秒）
